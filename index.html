@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Drum Tuner (Web)</title>
+  <title>Drum Tuner (開発中)　- Created by Haruto -</title>
   <style>
     :root{--bg:#0f172a;--fg:#e5e7eb;--muted:#94a3b8;--card:#111827;--good:#22c55e;--warn:#f59e0b;--bad:#ef4444;}
     body{margin:0;font-family:system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Noto Sans JP", "Apple Color Emoji", "Segoe UI Emoji";background:var(--bg);color:var(--fg);} 
@@ -27,10 +27,10 @@
     .lug h4{margin:0 0 6px 0;font-size:14px;color:#cbd5e1}
     .lug .hz{font-weight:700;font-size:18px}
     .meter{height:10px;background:#0b1220;border:1px solid #1f2937;border-radius:999px;overflow:hidden}
-    .bar{height:100%;background:linear-gradient(90deg,#ef4444,#f59e0b,#22c55e,#f59e0b,#ef4444)}
+    .bar{height:100%;background:linear-gradient(90deg,#1e40af,#93c5fd)}
     canvas{width:100%;height:140px;background:#0b1220;border:1px solid #1f2937;border-radius:10px}
     label{display:block;margin-bottom:6px}
-    input[type="number"], select{background:#0b1220;border:1px solid #1f2937;color:#e5e7eb;border-radius:10px;padding:8px;width:100%}
+    input[type="number"], select, input[type="range"]{background:#0b1220;border:1px solid #1f2937;color:#e5e7eb;border-radius:10px;padding:8px;width:100%}
     .footer{opacity:.7;font-size:12px;margin-top:12px}
     .tests{font-size:12px;line-height:1.4}
     .pass{color:#22c55e}
@@ -51,7 +51,7 @@
       </div>
       <div class="row" style="margin-top:14px">
         <div class="card">
-          <div class="muted">平均周波数</div>
+          <div class="muted">推定周波数</div>
           <div class="big mono" id="freq">--.- Hz</div>
           <div class="muted">信頼度: <span id="conf">--</span></div>
         </div>
@@ -78,7 +78,7 @@
       </label>
       <div style="display:flex;gap:8px;margin:8px 0 12px">
         <button id="saveLug" class="btn" disabled>このラグに保存</button>
-        <button id="clearLugs" class="btn" disabled>全クリア</button>
+        <button id="clearLugs" class="btn">全クリア</button>
       </div>
       <div class="grid" id="lugGrid"></div>
       <div style="margin-top:10px" class="muted">平均 <span id="avgHz">--</span> Hz / ばらつき(σ) <span id="stdHz">--</span> Hz</div>
@@ -100,17 +100,27 @@
           <label>平滑化（移動中央値サンプル数）
             <input type="number" id="smoothN" value="5" min="1" max="21" step="2" />
           </label>
+          <label>入力ゲイン（dB）
+            <input type="range" id="gainDb" min="-12" max="24" step="1" value="0" />
+            <span id="gainDbVal" class="muted">0 dB</span>
+          </label>
+          <label>バンドパス中心周波数（Hz）
+            <input type="number" id="bpFreq" value="300" min="50" max="4000" step="10" />
+          </label>
+          <label>バンドパスQ
+            <input type="number" id="bpQ" value="0.707" min="0.1" max="20" step="0.1" />
+          </label>
         </div>
         <div class="card">
           <div class="muted">使い方</div>
           <ol>
             <li>「<b>マイク開始</b>」をクリックしてマイク入力を許可してください。</li>
             <li>各ラグ近くを順番に叩いてください。</li>
-            <li>1打ごとに自動解析をします。十分な信頼度が得られた結果のみ保存できます。</li>
+            <li>1打ごとに自動解析をします。十分な信頼度が得られた結果のみ保存が可能です。</li>
             <li>保存したいラグを選択し、「<b>このラグに保存</b>」をクリックしてください。</li>
             <li>チューニングが終了したら、「<b>マイク停止</b>」をクリックしてください。</li>
           </ol>
-          <div class="muted">注意：平均周波数はヘッド/胴/共鳴/周囲の環境の影響を強く受けます。信頼度が低い場合は、叩く位置や周囲の環境を変えて、再度チューニングを試してください。</div>
+          <div class="muted">注意：推定周波数測定は「倍音/共鳴/周囲の環境」の影響を受けます。信頼度が低い場合は、叩く位置や周囲の環境を変えて、再度チューニングを試してください。</div>
         </div>
       </div>
     </details>
@@ -123,7 +133,7 @@
 </main>
 <script>
 // ==============================================
-// Drum Tuner (Web) — robust start/stop, HTTPS check, AudioContext.resume, confidence gate, short-hit STFT
+// Drum Tuner — AudioWorklet-based hit segmentation, band-pass prefilter, soft gain, robust smoothing
 // ==============================================
 
 // ---- Utilities ----
@@ -135,7 +145,7 @@ function isSecureContextOk(){
 function freqToNoteData(freq){
   if(!isFinite(freq) || freq<=0) return {note:"--", cents:"--"};
   const A4=440; const n = 12*Math.log2(freq/A4); const rounded = Math.round(n); const cents = Math.round((n - rounded)*100);
-  const noteIndex=(rounded+69)%12; const octave=Math.floor((rounded+69)/12);
+  const midi = 69 + rounded; const noteIndex = midi % 12; const octave = Math.floor(midi/12) - 1;
   const names=["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
   return {note:`${names[noteIndex]}${octave}`, cents:cents};
 }
@@ -159,6 +169,10 @@ const centsEl=document.getElementById('cents');
 const hpCut=document.getElementById('hpCut');
 const lpCut=document.getElementById('lpCut');
 const smoothN=document.getElementById('smoothN');
+const gainDb=document.getElementById('gainDb');
+const gainDbVal=document.getElementById('gainDbVal');
+const bpFreq=document.getElementById('bpFreq');
+const bpQ=document.getElementById('bpQ');
 const lugCountSel=document.getElementById('lugCount');
 const lugGrid=document.getElementById('lugGrid');
 const saveLug=document.getElementById('saveLug');
@@ -174,26 +188,30 @@ function setRunState(running){
 setRunState(false);
 
 // ---- State ----
-let audioCtx, analyser, source, scriptNode, mediaStream; 
+let audioCtx, analyser, source, mediaStream; 
+let bandpass, softGain, workletNode;
 let lastFreq=0; let lastConf=0; let allowSave=false; let smoother=new MedianSmoother(3);
 let lugCount=8; let lugHz=Array(lugCount).fill(null);
 let selectedLug=0; // 0-indexed
 
-// ---- Ring buffer ----
-let sampleRate=48000; const RING_SEC=4; let RING_SIZE=RING_SEC*sampleRate; let ring=new Float32Array(RING_SIZE); let ringPos=0; let totalSamples=0;
+// ---- Parameters ----
+let sampleRate=48000; const RING_SEC=4; // kept for compatibility
+let FILTER_MODE=true; const OUTLIER_HZ=15; let histHz=[]; const HIST_N=5; let tsSmooth=null;
 
 // ---- Onset/offset ----
-let env=0, envLP=0.005;
+let env=0, envLP=0.005; // kept for tests, not used in worklet path
 const ONSET_THR=0.04;     // normalized envelope threshold
-const OFFSET_THR=0.010;   // lower to catch very short tails
+const OFFSET_THR=0.010;   // short tails OK
 const MIN_HIT_MS=15;      // allow very short hits (~15ms)
 const QUIET_MS_AFTER=15;  // faster tail confirm
 const CONF_MIN=0.90;      // require >= 90% confidence
-let inHit=false; let hitStart=-1; let lastAbove=0; let hitEnd=-1;
 
 // ---- Drawing ----
 function drawWave(timeData){ const W=waveCanvas.width=waveCanvas.clientWidth; const H=waveCanvas.height=waveCanvas.clientHeight; wctx.clearRect(0,0,W,H); wctx.lineWidth=2; wctx.beginPath(); const N=timeData.length; for(let i=0;i<N;i++){ const x=i/N*W; const y=(0.5- timeData[i]/2)*H; if(i===0) wctx.moveTo(x,y); else wctx.lineTo(x,y);} wctx.strokeStyle='#93c5fd'; wctx.stroke(); }
 function drawSpectrum(freqData){ const W=specCanvas.width=specCanvas.clientWidth; const H=specCanvas.clientHeight; sctx.clearRect(0,0,W,H); sctx.fillStyle='#60a5fa'; const N=freqData.length; for(let i=0;i<N;i++){ const x=i/N*W; const v=freqData[i]/255; const h=v*H; sctx.fillRect(x, H-h, W/N, h);} }
+
+// ---- Worklet module (inline via Blob) ----
+const workletCode = `class HitSegProcessor extends AudioWorkletProcessor {\n  constructor(){\n    super();\n    this.env=0; this.envLP=0.005;\n    this.onsetThr=0.04; this.offsetThr=0.010;\n    this.minHitSamples=Math.round(0.015*sampleRate);\n    this.quietSamples=Math.round(0.015*sampleRate);\n    this.inHit=false; this.hitStart=0; this.lastAbove=0;\n    const ringSec=4; this.RING_SIZE=Math.max(8192, Math.floor(sampleRate*ringSec));\n    this.ring=new Float32Array(this.RING_SIZE); this.ringPos=0; this.total=0;\n    this.port.onmessage=(e)=>{ const c=e.data||{}; if(c.type==='config'){\n      if(typeof c.onsetThr==='number') this.onsetThr=c.onsetThr;\n      if(typeof c.offsetThr==='number') this.offsetThr=c.offsetThr;\n      if(typeof c.minHitMs==='number') this.minHitSamples=Math.max(16, Math.round(c.minHitMs/1000*sampleRate));\n      if(typeof c.quietMs==='number') this.quietSamples=Math.max(16, Math.round(c.quietMs/1000*sampleRate));\n    }};\n  }\n  process(inputs){\n    const input=inputs[0]; if(!input||input.length===0) return true; const ch=input[0];\n    for(let i=0;i<ch.length;i++){ const x=ch[i];\n      this.ring[this.ringPos]=x; this.ringPos=(this.ringPos+1)%this.RING_SIZE; this.total++;\n      this.env=(1-this.envLP)*this.env + this.envLP*Math.abs(x); const isLoud=this.env>this.onsetThr;\n      if(!this.inHit && isLoud){ this.inHit=true; this.hitStart=this.total; this.lastAbove=this.total; }\n      if(this.inHit){ if(isLoud) this.lastAbove=this.total; const since=this.total - this.lastAbove;\n        if(since>this.quietSamples && this.env<this.offsetThr){ const hitEnd=this.lastAbove; const N=hitEnd - this.hitStart; this.inHit=false;\n          if(N>=this.minHitSamples && N<this.RING_SIZE){ const buf=new Float32Array(N); for(let j=0;j<N;j++){ const idx=(this.hitStart+j)%this.RING_SIZE; buf[j]=this.ring[idx]; }\n            this.port.postMessage({type:'segment', buf:buf.buffer, sampleRate:sampleRate}, [buf.buffer]); }\n        } }\n    }\n    return true;\n  }\n}\nregisterProcessor('hit-seg-processor', HitSegProcessor);`;
 
 // ---- Audio start/stop ----
 async function startAudio(){
@@ -213,28 +231,34 @@ async function startAudio(){
     });
     audioCtx=new (window.AudioContext||window.webkitAudioContext)();
     await audioCtx.resume();
-    sampleRate=audioCtx.sampleRate; RING_SIZE=(RING_SEC*sampleRate)|0; ring=new Float32Array(RING_SIZE); ringPos=0; totalSamples=0; allowSave=false; lastFreq=0; lastConf=0; inHit=false;
+    sampleRate=audioCtx.sampleRate;
 
+    // nodes
     source=audioCtx.createMediaStreamSource(mediaStream);
+    bandpass=audioCtx.createBiquadFilter(); bandpass.type='bandpass'; bandpass.frequency.value=Number(bpFreq.value)||300; bandpass.Q.value=Number(bpQ.value)||0.707;
+    softGain=audioCtx.createGain(); setGainFromDb(Number(gainDb.value)||0);
     analyser=audioCtx.createAnalyser(); analyser.fftSize=2048; const bufferLen=2048; const timeData=new Float32Array(bufferLen); const byteFreq=new Uint8Array(analyser.frequencyBinCount);
-    scriptNode=audioCtx.createScriptProcessor(2048,1,1);
-    source.connect(analyser); analyser.connect(scriptNode); scriptNode.connect(audioCtx.destination);
+
+    // worklet
+    const url=URL.createObjectURL(new Blob([workletCode], {type:'text/javascript'}));
+    await audioCtx.audioWorklet.addModule(url);
+    workletNode=new AudioWorkletNode(audioCtx, 'hit-seg-processor');
+    workletNode.port.postMessage({type:'config', onsetThr:ONSET_THR, offsetThr:OFFSET_THR, minHitMs:MIN_HIT_MS, quietMs:QUIET_MS_AFTER});
+    workletNode.port.onmessage= (e)=>{
+      const msg=e.data||{}; if(msg.type==='segment' && msg.buf){ const seg=new Float32Array(msg.buf); analyzeSegment(seg, msg.sampleRate).then(({freq,conf})=>{ updateReadout(freq, conf); }).catch(err=>{ console.error(err); statusEl.textContent='解析エラー'; }); }
+    };
+
+    // routing: source -> bandpass -> softGain -> [analyser, worklet]
+    source.connect(bandpass);
+    bandpass.connect(softGain);
+    softGain.connect(analyser);
+    softGain.connect(workletNode);
 
     statusEl.textContent='計測待ち（打音検出）';
-    // ボタン初期状態
-    saveLug.disabled=true; clearLugs.disabled=false;
 
-    scriptNode.onaudioprocess=(e)=>{ const ch=e.inputBuffer.getChannelData(0);
-      for(let i=0;i<ch.length;i++){
-        const x=ch[i]; ring[ringPos]=x; ringPos=(ringPos+1)%RING_SIZE; totalSamples++;
-        env = (1-envLP)*env + envLP*Math.abs(x);
-        const isLoud = env>ONSET_THR;
-        if(!inHit && isLoud){ inHit=true; hitStart=totalSamples; lastAbove=totalSamples; statusEl.textContent='ヒット検出: 解析中…'; }
-        if(inHit){ if(isLoud) lastAbove=totalSamples; const dtMs=(totalSamples-lastAbove)/sampleRate*1000; if(dtMs>QUIET_MS_AFTER && env<OFFSET_THR){ hitEnd=lastAbove; const durMs=(hitEnd-hitStart)/sampleRate*1000; inHit=false; if(durMs>MIN_HIT_MS){ analyzeHit(hitStart, hitEnd).then(({freq,conf})=>{ updateReadout(freq, conf); }).catch(err=>{ console.error(err); statusEl.textContent='解析エラー'; }); } else { statusEl.textContent='超短音のため解析に十分な長さがありませんでした（もう一度軽く叩いてください）'; } }
-        }
-      }
-      analyser.getFloatTimeDomainData(timeData); drawWave(timeData); analyser.getByteFrequencyData(byteFreq); drawSpectrum(byteFreq);
-    };
+    // draw loop via analyser
+    const draw=()=>{ if(!analyser) return; const timeData=new Float32Array(analyser.fftSize); const byteFreq=new Uint8Array(analyser.frequencyBinCount); analyser.getFloatTimeDomainData(timeData); drawWave(timeData); analyser.getByteFrequencyData(byteFreq); drawSpectrum(byteFreq); requestAnimationFrame(draw); };
+    requestAnimationFrame(draw);
   }catch(err){
     console.error(err);
     statusEl.textContent='マイク開始に失敗：'+ (err && err.name ? err.name : '不明錯誤');
@@ -244,20 +268,28 @@ async function startAudio(){
 
 function stopAudio(){
   try{
-    if(scriptNode){ scriptNode.disconnect(); scriptNode.onaudioprocess=null; scriptNode=null; }
-    if(analyser){ analyser.disconnect(); analyser=null; }
-    if(source){ source.disconnect(); source=null; }
+    if(workletNode){ try{ workletNode.port.onmessage=null; }catch(_){} try{ workletNode.disconnect(); }catch(_){} workletNode=null; }
+    if(analyser){ try{ analyser.disconnect(); }catch(_){} analyser=null; }
+    if(softGain){ try{ softGain.disconnect(); }catch(_){} softGain=null; }
+    if(bandpass){ try{ bandpass.disconnect(); }catch(_){} bandpass=null; }
+    if(source){ try{ source.disconnect(); }catch(_){} source=null; }
     if(audioCtx){ try{ audioCtx.suspend && audioCtx.suspend(); }catch(e){} try{ audioCtx.close(); }catch(e){} audioCtx=null; }
     if(mediaStream){ mediaStream.getTracks().forEach(t=>t.stop()); mediaStream=null; }
   }catch(e){ console.warn('stop error', e); }
   setRunState(false);
-  // 保存可否は最後に受理した結果に従う（allowSave）
   saveLug.disabled = !allowSave;
   statusEl.textContent='停止中';
 }
 
 startBtn.addEventListener('click', startAudio);
 stopBtn.addEventListener('click', stopAudio);
+
+function setGainFromDb(db){ if(!softGain) return; const v=Math.pow(10, (db||0)/20); softGain.gain.value=v; gainDbVal.textContent=`${db} dB`; }
+
+gainDb.addEventListener('input', ()=>{ setGainFromDb(Number(gainDb.value)||0); });
+
+bpFreq.addEventListener('change', ()=>{ if(bandpass) bandpass.frequency.value=Number(bpFreq.value)||300; });
+bpQ.addEventListener('change', ()=>{ if(bandpass) bandpass.Q.value=Number(bpQ.value)||0.707; });
 
 function updateReadout(freq, conf){
   if(!(isFinite(freq)&&freq>0)) { saveLug.disabled=true; return; }
@@ -266,19 +298,26 @@ function updateReadout(freq, conf){
     confEl.textContent = `${Math.round(conf*100)}%`;
     allowSave=false; saveLug.disabled=true; return;
   }
-  lastFreq=freq; lastConf=conf; allowSave=true; saveLug.disabled=false;
-  freqEl.textContent = `${freq.toFixed(1)} Hz`;
+  let f=freq;
+  if(FILTER_MODE){
+    const sorted=[...histHz].sort((a,b)=>a-b); const med=sorted.length? sorted[Math.floor(sorted.length/2)] : f;
+    if(Math.abs(f-med)>OUTLIER_HZ){ f=0.3*f + 0.7*med; }
+    tsSmooth = (tsSmooth==null)? f : (0.5*tsSmooth + 0.5*f);
+    f=tsSmooth;
+    histHz.push(f); if(histHz.length>HIST_N) histHz.shift();
+  }
+  lastFreq=f; lastConf=conf; allowSave=true; saveLug.disabled=false;
+  freqEl.textContent = `${f.toFixed(1)} Hz`;
   confEl.textContent = `${Math.round(conf*100)}%`;
-  const nd=freqToNoteData(freq); noteEl.textContent=nd.note; centsEl.textContent=nd.cents;
+  const nd=freqToNoteData(f); noteEl.textContent=nd.note; centsEl.textContent=nd.cents;
   statusEl.textContent='結果更新（次の打音待ち）';
 }
 
-// ---- Analyze one hit ----
-async function analyzeHit(startSample, endSample){
-  const N=endSample-startSample; if(N<128) return {freq:0, conf:0};
-  const buf=new Float32Array(N); for(let i=0;i<N;i++){ const idx=(startSample+i)%RING_SIZE; buf[i]=ring[idx]; }
-  // steady region
-  const dropHead = Math.floor(N*0.05); const dropTail=Math.floor(N*0.10);
+// ---- Analyze one segment (from worklet) ----
+async function analyzeSegment(buf, sr){
+  if(!buf || buf.length<128) return {freq:0, conf:0};
+  const N=buf.length;
+  const dropHead = Math.floor(N*0.05), dropTail=Math.floor(N*0.10);
   let s0=dropHead, s1=N-dropTail; if(s1-s0<256){ s0=0; s1=N; }
   const steady=buf.subarray(s0, s1);
 
@@ -287,7 +326,7 @@ async function analyzeHit(startSample, endSample){
   const hann=new Float32Array(frame); for(let i=0;i<frame;i++){ hann[i]=0.5*(1-Math.cos(2*Math.PI*i/(frame-1))); }
   let padded=steady; if(steady.length<frame){ padded=new Float32Array(frame); padded.set(steady); }
 
-  const frames=[]; const binHz=sampleRate/frame; const loBin=Math.max(1, Math.floor(hp/binHz)); const hiBin=Math.min(frame/2-1, Math.ceil(lp/binHz));
+  const frames=[]; const binHz=sr/frame; const loBin=Math.max(1, Math.floor(hp/binHz)); const hiBin=Math.min(frame/2-1, Math.ceil(lp/binHz));
   for(let off=0; off+frame<=padded.length; off+=hop){
     const x=padded.subarray(off, off+frame);
     const re=new Float64Array(frame); const im=new Float64Array(frame);
@@ -353,37 +392,29 @@ clearLugs.addEventListener('click', ()=>{ lugHz=Array(lugCount).fill(null); rend
     ul.appendChild(li);
   }
   try{
-    // Test 1: DOM elements present
     add('DOM: startBtn exists', !!document.getElementById('startBtn'));
     add('DOM: stopBtn exists', !!document.getElementById('stopBtn'));
     add('DOM: saveLug exists', !!document.getElementById('saveLug'));
 
-    // Test 2: setRunState toggles without error
     let ok=true; try{ setRunState(true); setRunState(false); ok=true; }catch(e){ ok=false; }
     add('UI: setRunState does not throw', ok);
 
-    // Test 3: freqToNoteData(A4=440Hz)
     const n=freqToNoteData(440).note; add('Pitch map: 440Hz → A4', n==='A4', `got ${n}`);
 
-    // Test 4: FFT peak check on pure sine (220Hz)
     const rate=44100, f=220, N=1024; const re=new Float64Array(N); const im=new Float64Array(N);
     for(let i=0;i<N;i++){ re[i]=Math.sin(2*Math.PI*f*i/rate); im[i]=0; }
     const fft=new FFT(N); fft.transform(re,im);
     let idx=0, mag=0; for(let k=1;k<N/2;k++){ const m=Math.hypot(re[k],im[k]); if(m>mag){mag=m; idx=k;} }
-    const freq=idx*rate/N; add('FFT: 220Hz sine peak near 220Hz', Math.abs(freq-220)<10, `got ${freq.toFixed(1)}Hz`);
+    const ff=idx*rate/N; add('FFT: 220Hz sine peak near 220Hz', Math.abs(ff-220)<10, `got ${ff.toFixed(1)}Hz`);
 
-    // Test 5: HTTPS check message (does not assert true/false, only shows state)
     add('Env: secure context or localhost', isSecureContextOk(), location.protocol+"//"+location.host);
 
-    // Test 6: Confidence gate enables save
     saveLug.disabled=true; allowSave=false; updateReadout(220, 0.95);
     add('Gate: saveLug enabled when conf >= 90%', !saveLug.disabled);
 
-    // Test 7: Low confidence keeps save disabled
     saveLug.disabled=false; allowSave=true; updateReadout(220, 0.5);
     add('Gate: saveLug disabled when conf < 90%', saveLug.disabled);
 
-    // Test 8: Lug click selects different card
     renderLugs();
     const before=document.querySelector('.lug.selected');
     const all=document.querySelectorAll('.lug');
